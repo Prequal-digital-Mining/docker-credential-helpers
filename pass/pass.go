@@ -9,10 +9,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -20,19 +21,20 @@ import (
 )
 
 // PASS_FOLDER contains the directory where credentials are stored
-const PASS_FOLDER = "docker-credential-helpers" //nolint: golint
+const PASS_FOLDER = "docker-credential-helpers" //nolint:revive
 
-// Pass handles secrets using Linux secret-service as a store.
+// Pass handles secrets using pass as a store.
 type Pass struct{}
 
 // Ideally these would be stored as members of Pass, but since all of Pass's
 // methods have value receivers, not pointer receivers, and changing that is
 // backwards incompatible, we assume that all Pass instances share the same configuration
-
-// initializationMutex is held while initializing so that only one 'pass'
-// round-tripping is done to check pass is functioning.
-var initializationMutex sync.Mutex
-var passInitialized bool
+var (
+	// initializationMutex is held while initializing so that only one 'pass'
+	// round-tripping is done to check pass is functioning.
+	initializationMutex sync.Mutex
+	passInitialized     bool
+)
 
 // CheckInitialized checks whether the password helper can be used. It
 // internally caches and so may be safely called multiple times with no impact
@@ -85,8 +87,7 @@ func (p Pass) Add(creds *credentials.Credentials) error {
 		return errors.New("missing credentials")
 	}
 
-	encoded := base64.URLEncoding.EncodeToString([]byte(creds.ServerURL))
-
+	encoded := encodeServerURL(creds.ServerURL)
 	_, err := p.runPass(creds.Secret, "insert", "-f", "-m", path.Join(PASS_FOLDER, encoded, creds.Username))
 	return err
 }
@@ -97,17 +98,17 @@ func (p Pass) Delete(serverURL string) error {
 		return errors.New("missing server url")
 	}
 
-	encoded := base64.URLEncoding.EncodeToString([]byte(serverURL))
+	encoded := encodeServerURL(serverURL)
 	_, err := p.runPass("", "rm", "-rf", path.Join(PASS_FOLDER, encoded))
 	return err
 }
 
 func getPassDir() string {
-	passDir := "$HOME/.password-store"
-	if envDir := os.Getenv("PASSWORD_STORE_DIR"); envDir != "" {
-		passDir = envDir
+	if passDir := os.Getenv("PASSWORD_STORE_DIR"); passDir != "" {
+		return passDir
 	}
-	return os.ExpandEnv(passDir)
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".password-store")
 }
 
 // listPassDir lists all the contents of a directory in the password store.
@@ -116,16 +117,22 @@ func getPassDir() string {
 func listPassDir(args ...string) ([]os.FileInfo, error) {
 	passDir := getPassDir()
 	p := path.Join(append([]string{passDir, PASS_FOLDER}, args...)...)
-	contents, err := ioutil.ReadDir(p)
+	entries, err := os.ReadDir(p)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []os.FileInfo{}, nil
 		}
-
 		return nil, err
 	}
-
-	return contents, nil
+	infos := make([]fs.FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
 }
 
 // Get returns the username and secret to use for a given registry server URL.
@@ -134,23 +141,14 @@ func (p Pass) Get(serverURL string) (string, string, error) {
 		return "", "", errors.New("missing server url")
 	}
 
-	encoded := base64.URLEncoding.EncodeToString([]byte(serverURL))
-
-	if _, err := os.Stat(path.Join(getPassDir(), PASS_FOLDER, encoded)); err != nil {
-		if os.IsNotExist(err) {
-			return "", "", nil
-		}
-
-		return "", "", err
-	}
-
+	encoded := encodeServerURL(serverURL)
 	usernames, err := listPassDir(encoded)
 	if err != nil {
 		return "", "", err
 	}
 
 	if len(usernames) < 1 {
-		return "", "", fmt.Errorf("no usernames for %s", serverURL)
+		return "", "", credentials.NewErrCredentialsNotFound()
 	}
 
 	actual := strings.TrimSuffix(usernames[0].Name(), ".gpg")
@@ -172,7 +170,7 @@ func (p Pass) List() (map[string]string, error) {
 			continue
 		}
 
-		serverURL, err := base64.URLEncoding.DecodeString(server.Name())
+		serverURL, err := decodeServerURL(server.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -183,11 +181,27 @@ func (p Pass) List() (map[string]string, error) {
 		}
 
 		if len(usernames) < 1 {
-			return nil, fmt.Errorf("no usernames for %s", serverURL)
+			continue
 		}
 
-		resp[string(serverURL)] = strings.TrimSuffix(usernames[0].Name(), ".gpg")
+		resp[serverURL] = strings.TrimSuffix(usernames[0].Name(), ".gpg")
 	}
 
 	return resp, nil
+}
+
+// encodeServerURL returns the serverURL in base64-URL encoding to use
+// as directory-name in pass storage.
+func encodeServerURL(serverURL string) string {
+	return base64.URLEncoding.EncodeToString([]byte(serverURL))
+}
+
+// decodeServerURL decodes base64-URL encoded serverURL. ServerURLs are
+// used in encoded format for directory-names in pass storage.
+func decodeServerURL(encodedServerURL string) (string, error) {
+	serverURL, err := base64.URLEncoding.DecodeString(encodedServerURL)
+	if err != nil {
+		return "", err
+	}
+	return string(serverURL), nil
 }

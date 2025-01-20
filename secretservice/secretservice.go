@@ -1,12 +1,15 @@
+//go:build linux && cgo
+
 package secretservice
 
 /*
 #cgo pkg-config: libsecret-1
 
-#include "secretservice_linux.h"
+#include "secretservice.h"
 #include <stdlib.h>
 */
 import "C"
+
 import (
 	"errors"
 	"unsafe"
@@ -30,8 +33,10 @@ func (h Secretservice) Add(creds *credentials.Credentials) error {
 	defer C.free(unsafe.Pointer(username))
 	secret := C.CString(creds.Secret)
 	defer C.free(unsafe.Pointer(secret))
+	displayLabel := C.CString("Registry credentials for " + creds.ServerURL)
+	defer C.free(unsafe.Pointer(displayLabel))
 
-	if err := C.add(credsLabel, server, username, secret); err != nil {
+	if err := C.add(credsLabel, server, username, secret, displayLabel); err != nil {
 		defer C.g_error_free(err)
 		errMsg := (*C.char)(unsafe.Pointer(err.message))
 		return errors.New(C.GoString(errMsg))

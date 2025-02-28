@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"strings"
 	"testing"
 
@@ -12,27 +11,27 @@ import (
 )
 
 const (
-	validServerAddress   = "https://index.docker.io/v1"
+	validServerAddress   = "https://registry.example.com/v1"
 	validUsername        = "linus"
 	validServerAddress2  = "https://example.com:5002"
 	invalidServerAddress = "https://foobar.example.com"
-	missingCredsAddress  = "https://missing.docker.io/v1"
+	missingCredsAddress  = "https://missing.example.com/v1"
 )
 
 var errProgramExited = fmt.Errorf("exited 1")
 
 // mockProgram simulates interactions between the docker client and a remote
-// credentials helper.
+// credentials-helper.
 // Unit tests inject this mocked command into the remote to control execution.
 type mockProgram struct {
 	arg   string
 	input io.Reader
 }
 
-// Output returns responses from the remote credentials helper.
+// Output returns responses from the remote credentials-helper.
 // It mocks those responses based in the input in the mock.
 func (m *mockProgram) Output() ([]byte, error) {
-	in, err := ioutil.ReadAll(m.input)
+	in, err := io.ReadAll(m.input)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +80,7 @@ func (m *mockProgram) Output() ([]byte, error) {
 	return []byte(fmt.Sprintf("unknown argument %q with %q", m.arg, inS)), errProgramExited
 }
 
-// Input sets the input to send to a remote credentials helper.
+// Input sets the input to send to a remote credentials-helper.
 func (m *mockProgram) Input(in io.Reader) {
 	m.input = in
 }
@@ -93,57 +92,57 @@ func mockProgramFn(args ...string) Program {
 }
 
 func ExampleStore() {
-	p := NewShellProgramFunc("docker-credential-secretservice")
+	p := NewShellProgramFunc("docker-credential-pass")
 
 	c := &credentials.Credentials{
-		ServerURL: "https://example.com",
-		Username:  "calavera",
+		ServerURL: "https://registry.example.com",
+		Username:  "exampleuser",
 		Secret:    "my super secret token",
 	}
 
 	if err := Store(p, c); err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Println(err)
 	}
 }
 
 func TestStore(t *testing.T) {
 	valid := []credentials.Credentials{
-		{validServerAddress, "foo", "bar"},
-		{validServerAddress2, "<token>", "abcd1234"},
+		{ServerURL: validServerAddress, Username: "foo", Secret: "bar"},
+		{ServerURL: validServerAddress2, Username: "<token>", Secret: "abcd1234"},
 	}
 
 	for _, v := range valid {
 		if err := Store(mockProgramFn, &v); err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
 	}
 
 	invalid := []credentials.Credentials{
-		{invalidServerAddress, "foo", "bar"},
+		{ServerURL: invalidServerAddress, Username: "foo", Secret: "bar"},
 	}
 
 	for _, v := range invalid {
 		if err := Store(mockProgramFn, &v); err == nil {
-			t.Fatalf("Expected error for server %s, got nil", v.ServerURL)
+			t.Errorf("Expected error for server %s, got nil", v.ServerURL)
 		}
 	}
 }
 
 func ExampleGet() {
-	p := NewShellProgramFunc("docker-credential-secretservice")
+	p := NewShellProgramFunc("docker-credential-pass")
 
-	creds, err := Get(p, "https://example.com")
+	creds, err := Get(p, "https://registry.example.com")
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Println(err)
 	}
 
-	fmt.Printf("Got credentials for user `%s` in `%s`\n", creds.Username, creds.ServerURL)
+	_, _ = fmt.Printf("Got credentials for user `%s` in `%s`\n", creds.Username, creds.ServerURL)
 }
 
 func TestGet(t *testing.T) {
 	valid := []credentials.Credentials{
-		{validServerAddress, "foo", "bar"},
-		{validServerAddress2, "<token>", "abcd1234"},
+		{ServerURL: validServerAddress, Username: "foo", Secret: "bar"},
+		{ServerURL: validServerAddress2, Username: "<token>", Secret: "abcd1234"},
 	}
 
 	for _, v := range valid {
@@ -153,10 +152,10 @@ func TestGet(t *testing.T) {
 		}
 
 		if c.Username != v.Username {
-			t.Fatalf("expected username `%s`, got %s", v.Username, c.Username)
+			t.Errorf("expected username `%s`, got %s", v.Username, c.Username)
 		}
 		if c.Secret != v.Secret {
-			t.Fatalf("expected secret `%s`, got %s", v.Secret, c.Secret)
+			t.Errorf("expected secret `%s`, got %s", v.Secret, c.Secret)
 		}
 	}
 
@@ -166,10 +165,17 @@ func TestGet(t *testing.T) {
 		serverURL string
 		err       string
 	}{
-		{missingCredsAddress, credentials.NewErrCredentialsNotFound().Error()},
-		{invalidServerAddress, "error getting credentials - err: exited 1, out: `program failed`"},
-		{"", fmt.Sprintf("error getting credentials - err: %s, out: `%s`",
-			missingServerURLErr.Error(), missingServerURLErr.Error())},
+		{
+			serverURL: missingCredsAddress,
+			err:       credentials.NewErrCredentialsNotFound().Error(),
+		},
+		{
+			serverURL: invalidServerAddress,
+			err:       "error getting credentials - err: exited 1, out: `program failed`",
+		},
+		{
+			err: fmt.Sprintf("error getting credentials - err: %s, out: `%s`", missingServerURLErr.Error(), missingServerURLErr.Error()),
+		},
 	}
 
 	for _, v := range invalid {
@@ -178,26 +184,26 @@ func TestGet(t *testing.T) {
 			t.Fatalf("Expected error for server %s, got nil", v.serverURL)
 		}
 		if err.Error() != v.err {
-			t.Fatalf("Expected error `%s`, got `%v`", v.err, err)
+			t.Errorf("Expected error `%s`, got `%v`", v.err, err)
 		}
 	}
 }
 
 func ExampleErase() {
-	p := NewShellProgramFunc("docker-credential-secretservice")
+	p := NewShellProgramFunc("docker-credential-pass")
 
-	if err := Erase(p, "https://example.com"); err != nil {
-		fmt.Println(err)
+	if err := Erase(p, "https://registry.example.com"); err != nil {
+		_, _ = fmt.Println(err)
 	}
 }
 
 func TestErase(t *testing.T) {
 	if err := Erase(mockProgramFn, validServerAddress); err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 
 	if err := Erase(mockProgramFn, invalidServerAddress); err == nil {
-		t.Fatalf("Expected error for server %s, got nil", invalidServerAddress)
+		t.Errorf("Expected error for server %s, got nil", invalidServerAddress)
 	}
 }
 
@@ -208,6 +214,6 @@ func TestList(t *testing.T) {
 	}
 
 	if username, exists := auths[validServerAddress]; !exists || username != validUsername {
-		t.Fatalf("auths[%s] returned %s, %t; expected %s, %t", validServerAddress, username, exists, validUsername, true)
+		t.Errorf("auths[%s] returned %s, %t; expected %s, %t", validServerAddress, username, exists, validUsername, true)
 	}
 }

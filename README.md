@@ -1,3 +1,9 @@
+[![GitHub release](https://img.shields.io/github/release/docker/docker-credential-helpers.svg?style=flat-square)](https://github.com/docker/docker-credential-helpers/releases/latest)
+[![PkgGoDev](https://img.shields.io/badge/go.dev-docs-007d9c?style=flat-square&logo=go&logoColor=white)](https://pkg.go.dev/github.com/docker/docker-credential-helpers)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/docker/docker-credential-helpers/build.yml?label=build&logo=github&style=flat-square)](https://github.com/docker/docker-credential-helpers/actions?query=workflow%3Abuild)
+[![Codecov](https://img.shields.io/codecov/c/github/docker/docker-credential-helpers?logo=codecov&style=flat-square)](https://codecov.io/gh/docker/docker-credential-helpers)
+[![Go Report Card](https://goreportcard.com/badge/github.com/docker/docker-credential-helpers?style=flat-square)](https://goreportcard.com/report/github.com/docker/docker-credential-helpers)
+
 ## Introduction
 
 docker-credential-helpers is a suite of programs to use native stores to keep Docker credentials safe.
@@ -6,30 +12,52 @@ docker-credential-helpers is a suite of programs to use native stores to keep Do
 
 Go to the [Releases](https://github.com/docker/docker-credential-helpers/releases) page and download the binary that works better for you. Put that binary in your `$PATH`, so Docker can find it.
 
-### Building from scratch
+## Building
 
-The programs in this repository are written with the Go programming language. These instructions assume that you have previous knowledge about the language and you have it installed in your machine.
+You can build the credential helpers using Docker:
 
-1 - Download the source and put it in your `$GOPATH` with `go get`.
+```shell
+# install emulators
+$ docker run --privileged --rm tonistiigi/binfmt --install all
 
+# create builder
+$ docker buildx create --use
+
+# build credential helpers from remote repository and output to ./bin/build
+$ docker buildx bake "https://github.com/docker/docker-credential-helpers.git"
+
+# or from local source
+$ git clone https://github.com/docker/docker-credential-helpers.git
+$ cd docker-credential-helpers
+$ docker buildx bake
 ```
-$ go get github.com/docker/docker-credential-helpers
+
+Or if the toolchain is already installed on your machine:
+
+1. Download the source.
+
+```shell
+$ git clone https://github.com/docker/docker-credential-helpers.git
+$ cd docker-credential-helpers
 ```
 
-2 - Use `make` to build the program you want. That will leave an executable in the `bin` directory inside the repository.
+2.  Use `make` to build the program you want. That will leave an executable in the `bin` directory inside the repository.
 
-```
-$ cd $GOPATH/docker/docker-credentials-helpers
+```shell
 $ make osxkeychain
 ```
 
-3 - Put that binary in your `$PATH`, so Docker can find it.
+3.  Put that binary in your `$PATH`, so Docker can find it.
+
+```shell
+$ cp bin/build/docker-credential-osxkeychain /usr/local/bin/
+```
 
 ## Usage
 
 ### With the Docker Engine
 
-Set the `credsStore` option in your `.docker/config.json` file with the suffix of the program you want to use. For instance, set it to `osxkeychain` if you want to use `docker-credential-osxkeychain`.
+Set the `credsStore` option in your `~/.docker/config.json` file with the suffix of the program you want to use. For instance, set it to `osxkeychain` if you want to use `docker-credential-osxkeychain`.
 
 ```json
 {
@@ -73,8 +101,8 @@ A credential helper can be any program that can read values from the standard in
 
 This repository also includes libraries to implement new credentials programs in Go. Adding a new helper program is pretty easy. You can see how the OS X keychain helper works in the [osxkeychain](osxkeychain) directory.
 
-1. Implement the interface `credentials.Helper` in `YOUR_PACKAGE/YOUR_PACKAGE_$GOOS.go`
-2. Create a main program in `YOUR_PACKAGE/cmd/main_$GOOS.go`.
+1. Implement the interface `credentials.Helper` in `YOUR_PACKAGE/`
+2. Create a main program in `YOUR_PACKAGE/cmd/`.
 3. Add make tasks to build your program and run tests.
 
 ## License
